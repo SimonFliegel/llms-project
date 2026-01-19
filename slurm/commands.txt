@@ -1,0 +1,15 @@
+=============== Allocate job ===============
+salloc --ntasks=1 --cpus-per-task=8 --gres=gpu:1 --time=1:00:00 --mem=32G -N 1
+
+=============== Get Job-ID ===============
+squeue --me
+
+=============== Get Bash on compute node ===============
+srun --jobid <jobid> --pty bash
+
+=============== activate modules ============
+module load release/24.04 GCCcore/11.3.0 Python/3.10.4
+
+=============== Activate venv ===============
+source path/to/venv/bin/activate
+

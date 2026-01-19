@@ -1,0 +1,9 @@
+.vscode
+
+.hf_token
+hf_home/
+models/
+
+src/__pycache__/
+src/_unsloth*/
+src/unsloth*/

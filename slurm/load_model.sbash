@@ -1,0 +1,12 @@
+#!/bin/sh
+#SBATCH --nodes 1           # run one process in parallel
+#SBATCH --ntasks 1         # total number of tasks across all nodes
+#SBATCH -t 01:00:00    # 00:05:00 --> runs for 5 minutes
+#SBATCH -o load_model_%j.out  # save output under HPC_${SLURMJOBID}.out
+#SBATCH -e load_model_%j.err  # save error messages under HPC_${SLURMJOBID}.err
+
+module load release/24.04 GCCcore/11.3.0 Python/3.10.4
+source ../venvs/project/bin/activate
+export HUGGINGFACE_TOKEN=$(cat .hf_token)
+huggingface-cli login --token $HUGGINGFACE_TOKEN
+python load_model.py
