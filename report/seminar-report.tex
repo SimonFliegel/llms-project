@@ -1,0 +1,95 @@
+\pdfoutput=1
+\documentclass[11pt]{article}
+\usepackage[final]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[nolist]{acronym}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+
+\title{LLMs Project Report}
+
+\author{Simon Fliegel \\
+  Computer Science (Master) / Secrets Behind LLMs \\
+  Matriculation number: 5342785\\
+  \texttt{simon.fliegel@mailbox.tu-dresden.de} 
+}
+
+\begin{document}
+\maketitle
+
+\begin{acronym}[PEFT]
+  \acro{saq}[SAQ]{Single Answer Question}
+  \acro{mcq}[MCQ]{Multiple Choice Question}
+  \acro{peft}[PEFT]{Parameter-Efficient Fine-Tuning}
+  \acro{lora}[LoRA]{Low-Rank Adaption}
+\end{acronym}
+
+\begin{abstract}
+This document is a supplement to the general instructions for *ACL authors. It contains instructions for using the \LaTeX{} style files for ACL conferences.
+The document itself conforms to its own specifications, and is therefore an example of what your manuscript should look like.
+These instructions should be used both for papers submitted for review and for final versions of accepted papers.
+\end{abstract}
+
+
+
+\section{Introduction}
+
+The task was to use the base model \textit{Meta Llama - 8B} and tweak it to generate answers for cultural questions. There are two types of tasks related to these questions: \ac{mcq} and \ac{saq}. For both task two CSV-files, one for training and one for testing file, were provided. The predictions for \ac{mcq} and \ac{saq} are written to separate files. These prediction files had to be submitted to the Codabench Competition of the module to participate. After submission the predictions were evaluated and the accuracy was scored for the two tasks. The goal of the project was to experiment with the base model and apply the techniques we learnt throughout the course to a real world problem. The benchmark platform is a nice way to keep track of own improvements and compare them to the other participants in the course. In the next section, I will describe the steps I took to improve the accuracy in detail.
+
+\section{System Design and Optimization Steps}
+
+\subsection{Hello World!}
+
+The first step was to gain access to the base model \textit{Meta Llama - 8B} through Huggingface \cite{llama-3-huggingface}. To use the model it can be loaded from Huggingface-API. After successfully loading the model, it can be already used to generate predictions by passing in a prompt and some configuration arguments. Consequently my first running example just received a prompt as user input, passed it to the model, and printed the response back to the console and terminates.
+
+\subsection{Base Model Performance}
+
+With a running "Hello World" example, I had everything set up to a point where I could start working on the project. My first goal was to test this base model without any tuning on the test datasets to see how it performs and to set a base line for later improvements. I analyzed the format of the test files to extract the necessary information that can be used as input for the model. Firstly, I just extracted the \texttt{prompt} field for \ac{mcq} and the \texttt{en\_question} for \ac{saq} and used it as input. Later, I added an additional \texttt{instruct} field where I can add context to each prompt for flexibility with e.g., \textit{In-context learning}. The results of the base model on the test files were quite mixed. While it did answer some of the \acp{mcq} correctly and also in the correct format it had trouble with \acp{saq}. Often it just repeated the question or asked a related question as answer until it ran out of tokens. As I initially planned to try out fine tuning anyways I didn't spend much time fixing the performance of the base model there and hoped that these problems would vanish once the model is properly tuned to these tasks.
+
+\subsection{Fine-Tuning}
+
+For fine-tuning I opted for \ac{peft} using \ac{lora} layers as a very common choice with many online resources available \cite{gfg-peft}. With \ac{lora}, the base model's weights are frozen and special layers are added to specified \textit{target modules}. Traditionally, fine-tuning updates a weight matrix $W$ of size $d \times d$. However that is demanding and can lead to the base model "forgetting" things it has already learned. \ac{lora} approximates the change $\Delta W$ by multiplaying two smaller matrices $A$ and $B$ of sizes $d \times r$ and $r \times d$ respectively. The parameter $r$ represents the \textit{rank} of the \ac{lora} layer and affects the \textit{influence} of the fine-tuning together with the parameter $\alpha$. A higher rank means that the weight update is applied to more dimensions offering more capacity for potentially more complex problems but also requires more compute and memory than a lower rank \cite{unsloth}. The parameter $\alpha$ is often chosen as $\alpha = 2 \cdot r$ and determines how much weight is given to the new \ac{lora} weights. 
+I did a little research on implementation and ended up using a Python library called \href{https://github.com/unslothai/unsloth}{\texttt{unsloth}} as it is very popular, well documented and easy to use and offers great performance and optimizations in that field \cite{fine-tuning-frameworks}. I did experiment a little bit with \texttt{rank}, \texttt{alpha} as well as the \texttt{target modules} which define where the \ac{lora} layers are added. Initially I used $r=16$ and the target modules \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, and \texttt{o\_proj} representing the four attention modules query-, key-, value-, and output-projection. Later I increased the rank to $r=64$ and added \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}, and \texttt{lm\_head} to target modules affecting intermediate representations and also the final output layer. While this increased the resource requirements it didn't really affect the results so I stopped spending time on parameter optmization and tried other things.
+
+\subsection{Combining Tasks}
+
+Right from the beginning I asked myself whether it was necessary to train one model for each task or if a single model can be trained for both leveraging the knowledge it leant in the training data of the one task and applying it to questions of the other. When using a single model, the task has to be encoded somehow in the prompt so the model knows what answer format is expected. However, with the additional instruction field I added earlier, this was definitely possible.
+
+%TODO unexpectecly results didn't who high difference but I still continued to test out both versions for each change
+
+\subsection{Data Augmentation}
+
+While it felt like I was in a dead-end with hyperparameter tuning and task separation and my score was pushed down more and more in the leaderboard I revised the lectures to see what other options I had to improve the results. The one thing where I haven't spent much thought on was the data itself. 
+I thought about synthetic data generation and using a bigger model to generate additional training data. However, I wasn't sure whether the quality of the generated data would be good enough as I could not validate it myself, also it would have cost me significantly more time to set this up and also it felt a bit like cheating exploiting a bigger model to generate more training data. When first writing the code for extracting the data from the \texttt{train\_dataset\_saq.csv} I only took the answer with the highest count as being the answer with the highest certainty of correctness. However, to gain more training data I changed this to multiplying the question and using each possible answer.
+Now the question was whether something similar was possible to the \ac{mcq} data. Actually I haven't used all information there either. For each answer option there was given the name of that country for which this answer would be true. I didn't give this much thought in the beginning either but this allows to increase the number of training samples for \ac{mcq} by four times using each answer option as a separate training sample. The only thing that has to be done for that is replacing the country in the initial question with the one from the answer option and changing the correct answer in the training data to that option.
+
+\section{Results}
+
+\subsection{Improvements}
+
+% diagram showing rising accuracy with each iteration
+
+\subsection{Conclusion}
+
+% table showing final accuracy of the best performaing mode (what is listed in leaderboard)
+
+
+\section{Tools}
+
+Throughout working on this project, \textit{Google Gemini Pro} was used for coding asssistance and fixing grammar and typos in this report.
+
+
+\bibliography{references}
+
+\appendix
+
+\section{Example Appendix}
+\label{sec:appendix}
+
+This is an appendix.
+
+\end{document}

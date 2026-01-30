@@ -1,0 +1,48 @@
+# LaTeX intermediate and auxiliary files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex
+*.nav
+*.snm
+*.vrb
+*.idx
+*.ilg
+*.ind
+*.ist
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.maf
+*.mtc*
+*.run.xml
+*.bbl
+*.blg
+
+# latexmk / build artifacts and temp dirs
+latexmkrc
+_latexindent_tmp
+_build/
+build/
+*.auxlock
+
+# minted package cache
+_minted-*/
+
+# editor/OS temp files
+*~
+.#*
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
