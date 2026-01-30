@@ -73,7 +73,7 @@ def test_task(model_id: str, task_type: TaskType):
         for line in f:
             samples.append(sample_class.from_jsonl(line))
         
-    prompts = [s.get_inference_prompt() for s in samples]
+    prompts = [s.get_alpaca_inference_prompt() for s in samples]
 
     gen = pipeline(
         "text-generation",

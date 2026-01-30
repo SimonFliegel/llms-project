@@ -58,15 +58,15 @@ class TrainingSample(Sample):
             output=data.get("output")
         )
     
-    @staticmethod
-    def format_for_llama(instruction, input_text, output_text, tokenizer):
+    def format_alpaca_training_prompt(self, tokenizer):
         prompt = (
-            f"### Instruction:\n{instruction}\n\n"
-            f"### Input:\n{input_text}\n\n"
-            f"### Response:\n{output_text}"
+            f"### Task Context:\nCountry: {self.country}\nMode: {self.task_type}\n\n"
+            f"### Instruction:\n{self.instruction}\n\n"
+            f"### Question:\n{self.input}\n\n"
+            f"### Response:\n{self.output}"
         )
         return prompt + tokenizer.eos_token
-
+    
 class TestSample(Sample):
     def __init__(self, id, country, task_type, instruction, input):
         super().__init__(id, country, task_type, instruction, input)
@@ -90,16 +90,17 @@ class TestSample(Sample):
             input=data.get("input"),
         )
 
-    def get_inference_prompt(self):
+    def get_alpaca_inference_prompt(self):
         return (
+            f"### Task Context:\nCountry: {self.country}\nMode: {self.task_type}\n\n"
             f"### Instruction:\n{self.instruction}\n\n"
-            f"### Input:\n{self.input}\n\n"
+            f"### Question:\n{self.input}\n\n"
             f"### Response:\n"
         )
     
 class MCQTrainingSample(TrainingSample):
     def __init__(self, id, country, input, output):
-        super().__init__(id, country, TaskType.MCQ, "You are a cultural expert. Select the correct option for the following question. Provide the answer in the requested JSON format.", input, output)
+        super().__init__(id, country, TaskType.MCQ, "The following is a multiple-choice question about cultural practices and preferences. Based on the specified country, select the single most accurate letter choice (A, B, C, or D).", input, output)
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
@@ -112,7 +113,7 @@ class MCQTrainingSample(TrainingSample):
 
 class MCQTestSample(TestSample):
     def __init__(self, id, country, input):
-        super().__init__(id, country, TaskType.MCQ, "You are a cultural expert. Select the correct option for the following question. Provide the answer in the requested JSON format.", input)
+        super().__init__(id, country, TaskType.MCQ, "The following is a multiple-choice question about cultural practices and preferences. Based on the specified country, select the single most accurate letter choice (A, B, C, or D).", input)
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
@@ -124,7 +125,7 @@ class MCQTestSample(TestSample):
 
 class SAQTrainingSample(TrainingSample):
     def __init__(self, id, country, input, output):
-        super().__init__(id, country, TaskType.SAQ, "Answer the following question concisely and accurately.", input, output)
+        super().__init__(id, country, TaskType.SAQ, "Provide a direct and concise answer to the cultural question below. Use only a single word or short phrase that represents the general consensus in the specified country.", input, output)
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
@@ -137,7 +138,7 @@ class SAQTrainingSample(TrainingSample):
 
 class SAQTestSample(TestSample):
     def __init__(self, id, country, input):
-        super().__init__(id, country, TaskType.SAQ, "Answer the following question concisely and accurately.", input)
+        super().__init__(id, country, TaskType.SAQ, "Provide a direct and concise answer to the cultural question below. Use only a single word or short phrase that represents the general consensus in the specified country.", input)
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
@@ -175,16 +176,14 @@ class MCQAnswer():
     
     @classmethod
     def extract_answer(cls, response: str) -> MCQChoice | None:
-        response = (response or "").strip()
-        try:
-            clean_text = re.sub(r'^```json\s*|\s*```$', '', response, flags=re.MULTILINE)
-            obj = json.loads(clean_text)
-            if isinstance(obj, dict):
-                v = obj.get("answer_choice") or obj.get("answer")
-                if v and str(v).upper() in "ABCD":
-                    return MCQChoice[str(v).upper()]
-        except:
-            pass
+        response = (response or "").strip().upper()
+        match = re.search(r'\b([A-D])\b', response)
+        if match:
+            letter = match.group(1)
+            return MCQChoice[letter]
+        if response and response[0] in "ABCD":
+            return MCQChoice[response[0]]
+        return None
     
     def to_tsv(self):
         choices = [

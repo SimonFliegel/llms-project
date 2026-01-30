@@ -32,17 +32,14 @@ def build_dataset_from_jsonl(task_mode: str) -> Dataset:
     
     print(f"Loading {task_mode} training data from {file_path}...")
     
-    samples = []
+    raw_dicts = []
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
             data = json.loads(line)
-            samples.append({
-                "instruction": data["instruction"],
-                "input": data["input"],
-                "output": data["output"]
-            })
+            obj = TrainingSample.from_dict(data)
+            raw_dicts.append(obj.to_dict())
             
-    return Dataset.from_list(samples)
+    return Dataset.from_list(raw_dicts)
 
 def load_model_and_tokenizer():
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -67,13 +64,23 @@ def add_lora_adapters(model):
         bias="none",
         use_gradient_checkpointing="unsloth",
         random_state=3407,
+        use_rslora=True,
     )
 
 def format_prompts(examples, tokenizer):
-    texts = [
-        TrainingSample.format_for_llama(ins, inp, out, tokenizer) 
-        for ins, inp, out in zip(examples["instruction"], examples["input"], examples["output"])
-    ]
+    texts = []
+    for i in range(len(examples["input"])):
+        sample_obj = TrainingSample(
+            id=examples["id"][i],
+            country=examples["country"][i],
+            task_type=examples["task_type"][i],
+            instruction=examples["instruction"][i],
+            input=examples["input"][i],
+            output=examples["output"][i]
+        )
+        prompt = sample_obj.format_alpaca_training_prompt(tokenizer)
+        texts.append(prompt)
+    
     return {"text": texts}
 
 def train_and_save(model, tokenizer, dataset, ft_model_dir, max_seq_length):
@@ -87,13 +94,15 @@ def train_and_save(model, tokenizer, dataset, ft_model_dir, max_seq_length):
             output_dir = ft_model_dir,
             per_device_train_batch_size = 16,
             gradient_accumulation_steps = 4,
-            warmup_steps = 10,
-            num_train_epochs = 3,
-            learning_rate = 1e-4,
+            warmup_ratio=0.1,
+            num_train_epochs = 5,
+            learning_rate = 1e-5,
+            lr_scheduler_type = "cosine",
             bf16 = True,
             logging_steps = 1,
             optim = "adamw_8bit",
-            weight_decay = 0.05,
+            weight_decay = 0.1,
+            neftune_noise_alpha = 5.0,
             seed = 3407,
         ),
     )
@@ -131,7 +140,7 @@ if __name__ == "__main__":
 
     raw_arg = sys.argv[1].lower().strip()
 
-    valid_task_values = [t.value for t in TaskType]
+    valid_task_values = [t.value for t in TaskType] 
     
     if raw_arg == "combined" or raw_arg in valid_task_values:
         print(f"Starting training pipeline for mode: {raw_arg}")
