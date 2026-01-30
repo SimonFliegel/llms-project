@@ -6,16 +6,31 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage[nolist]{acronym}
+\usepackage[parfill]{parskip}
 \usepackage{microtype}
 \usepackage{inconsolata}
 \usepackage{graphicx}
+\usepackage{amsfonts}
+\usepackage{listings}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,      % This enables line wrapping
+  breakatwhitespace=true, 
+  frame=single,         % Optional: adds a box around the prompt
+  columns=fullflexible,
+  xleftmargin=1em,
+  xrightmargin=1em
+}
 
 \title{LLMs Project Report}
 
 \author{Simon Fliegel \\
   Computer Science (Master) / Secrets Behind LLMs \\
   Matriculation number: 5342785\\
-  \texttt{simon.fliegel@mailbox.tu-dresden.de} 
+  \texttt{simon.fliegel@mailbox.tu-dresden.de} \\
+  Codabench-Username: \texttt{simonf} \\
+  Source-Code: \url{https://github.com/SimonFliegel/llms-project}
 }
 
 \begin{document}
@@ -26,70 +41,148 @@
   \acro{mcq}[MCQ]{Multiple Choice Question}
   \acro{peft}[PEFT]{Parameter-Efficient Fine-Tuning}
   \acro{lora}[LoRA]{Low-Rank Adaption}
+  \acro{llm}[LLM]{Large Language Model}
 \end{acronym}
 
 \begin{abstract}
-This document is a supplement to the general instructions for *ACL authors. It contains instructions for using the \LaTeX{} style files for ACL conferences.
-The document itself conforms to its own specifications, and is therefore an example of what your manuscript should look like.
-These instructions should be used both for papers submitted for review and for final versions of accepted papers.
+This report details the iterative development of a culturally-aware language model based on the \textit{Meta-Llama-3-8B} architecture. The task involves addressing cultural nuances through two distinct formats: \ac{mcq} and \ac{saq}. Starting from a zero-shot baseline that exhibited significant structural failures and repetition loops, I implement a series of stepwise optimizations using \ac{peft} via \ac{lora}. I explore the transition from task-specific specialized models to a unified multi-task architecture, supported by structural contextual prompting and a higher-rank adaptation ($r=64$). To address data scarcity, I evaluate several augmentation strategies, finding that country-choice permutation and uniform upsampling significantly improve performance, while high-variance label augmentation introduces detrimental noise. The final system demonstrates that while model capacity is foundational, contextual grounding and data-centric refinements are the primary drivers for aligning \acp{llm} with specialized, culturally-dependent domains.
 \end{abstract}
 
-
-
 \section{Introduction}
+\label{sec:introduction}
 
-The task was to use the base model \textit{Meta Llama - 8B} and tweak it to generate answers for cultural questions. There are two types of tasks related to these questions: \ac{mcq} and \ac{saq}. For both task two CSV-files, one for training and one for testing file, were provided. The predictions for \ac{mcq} and \ac{saq} are written to separate files. These prediction files had to be submitted to the Codabench Competition of the module to participate. After submission the predictions were evaluated and the accuracy was scored for the two tasks. The goal of the project was to experiment with the base model and apply the techniques we learnt throughout the course to a real world problem. The benchmark platform is a nice way to keep track of own improvements and compare them to the other participants in the course. In the next section, I will describe the steps I took to improve the accuracy in detail.
+The objective of this project was to adapt the \textit{Meta-Llama-3-8B} base model to address cultural nuances through two distinct natural language processing tasks: \ac{mcq} and \ac{saq}. For each task, a dataset consisting of training and test sets in CSV format was provided.
+
+The project workflow involved generating predictions for both formats and submitting them to a dedicated Codabench competition. This platform provided a standardized benchmark for evaluating model accuracy and facilitated a comparative analysis of performance improvements by providing a submission history, as well as a leaderboard for performance comparisons with other participants in the course.
+
+The primary goal was to bridge the gap between theoretical concepts covered in the course and the practical challenges of applying an \ac{llm} to a specialized domain. In the following sections, I detail the sequential optimization steps taken and analyze the resulting gains in accuracy.
 
 \section{System Design and Optimization Steps}
+\label{sec:design}
 
-\subsection{Hello World!}
+\subsection{Initial Model Integration}
+\label{sec:integration}
 
-The first step was to gain access to the base model \textit{Meta Llama - 8B} through Huggingface \cite{llama-3-huggingface}. To use the model it can be loaded from Huggingface-API. After successfully loading the model, it can be already used to generate predictions by passing in a prompt and some configuration arguments. Consequently my first running example just received a prompt as user input, passed it to the model, and printed the response back to the console and terminates.
+The first phase of development involved securing access to the \textit{Meta-Llama-3-8B} base model via the Hugging Face Hub \cite{llama-3-huggingface}. The model was integrated using the Hugging Face Transformers API. Upon successful initialization, the model could generate text by processing a prompt alongside specific configuration arguments. My initial "Hello World" implementation followed a straightforward execution path: it accepted a user prompt, passed it through the model's transformer layers, and streamed the response to the console before terminating. This served as a critical sanity check for the environment and allowed me to continue with the next steps.
 
-\subsection{Base Model Performance}
+\subsection{Establishing the Zero-Shot Baseline}
+\label{sec:baseline}
 
-With a running "Hello World" example, I had everything set up to a point where I could start working on the project. My first goal was to test this base model without any tuning on the test datasets to see how it performs and to set a base line for later improvements. I analyzed the format of the test files to extract the necessary information that can be used as input for the model. Firstly, I just extracted the \texttt{prompt} field for \ac{mcq} and the \texttt{en\_question} for \ac{saq} and used it as input. Later, I added an additional \texttt{instruct} field where I can add context to each prompt for flexibility with e.g., \textit{In-context learning}. The results of the base model on the test files were quite mixed. While it did answer some of the \acp{mcq} correctly and also in the correct format it had trouble with \acp{saq}. Often it just repeated the question or asked a related question as answer until it ran out of tokens. As I initially planned to try out fine tuning anyways I didn't spend much time fixing the performance of the base model there and hoped that these problems would vanish once the model is properly tuned to these tasks.
+With a functional pipeline, the next objective was to establish a performance baseline by evaluating the base model on the test datasets without any prior tuning. I analyzed the schema of the test files to extract the relevant input features. Initially, I utilized the \texttt{prompt} field for \acp{mcq} and the \texttt{en\_question} field for \acp{saq} as raw inputs. 
+
+To introduce more flexibility, I later implemented an \texttt{instruct} field. This allowed for the inclusion of contextual constraints and facilitated techniques such as in-context learning. The zero-shot results were inconsistent. While the model occasionally handled \acp{mcq} with the correct formatting, it struggled significantly with the \ac{saq} task. In many instances, the model exhibited "repetition loops," either echoing the question or generating irrelevant queries until the token limit was reached. Given that fine-tuning was a planned milestone, I moved forward under the hypothesis that supervised alignment would resolve these behavioral issues.
 
 \subsection{Fine-Tuning}
+\label{sec:fine-tuning}
 
-For fine-tuning I opted for \ac{peft} using \ac{lora} layers as a very common choice with many online resources available \cite{gfg-peft}. With \ac{lora}, the base model's weights are frozen and special layers are added to specified \textit{target modules}. Traditionally, fine-tuning updates a weight matrix $W$ of size $d \times d$. However that is demanding and can lead to the base model "forgetting" things it has already learned. \ac{lora} approximates the change $\Delta W$ by multiplaying two smaller matrices $A$ and $B$ of sizes $d \times r$ and $r \times d$ respectively. The parameter $r$ represents the \textit{rank} of the \ac{lora} layer and affects the \textit{influence} of the fine-tuning together with the parameter $\alpha$. A higher rank means that the weight update is applied to more dimensions offering more capacity for potentially more complex problems but also requires more compute and memory than a lower rank \cite{unsloth}. The parameter $\alpha$ is often chosen as $\alpha = 2 \cdot r$ and determines how much weight is given to the new \ac{lora} weights. 
-I did a little research on implementation and ended up using a Python library called \href{https://github.com/unslothai/unsloth}{\texttt{unsloth}} as it is very popular, well documented and easy to use and offers great performance and optimizations in that field \cite{fine-tuning-frameworks}. I did experiment a little bit with \texttt{rank}, \texttt{alpha} as well as the \texttt{target modules} which define where the \ac{lora} layers are added. Initially I used $r=16$ and the target modules \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, and \texttt{o\_proj} representing the four attention modules query-, key-, value-, and output-projection. Later I increased the rank to $r=64$ and added \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}, and \texttt{lm\_head} to target modules affecting intermediate representations and also the final output layer. While this increased the resource requirements it didn't really affect the results so I stopped spending time on parameter optmization and tried other things.
+For the training phase, I employed \ac{peft} using \ac{lora} \cite{gfg-peft}, a method that preserves the pre-trained weights of the base model while injecting trainable low-rank matrices into specified \textit{target modules}. Mathematically, while traditional fine-tuning updates a weight matrix $W \in \mathbb{R}^{d \times d}$ directly, \ac{lora} approximates the update $\Delta W$ through the product of two smaller matrices, $A \in \mathbb{R}^{d \times r}$ and $B \in \mathbb{R}^{r \times d}$, where $r \ll d$. 
+
+The rank $r$ and the scaling factor $\alpha$ govern the capacity and influence of the adaptation. A higher rank provides more parameters for learning complex cultural nuances but increases computational overhead \cite{unsloth}. Following common heuristics, I set $\alpha = 2r$ to balance the weight of the new adaptations against the base knowledge.
+
+To implement this, I utilized the \texttt{unsloth} library due to its optimized kernels and memory efficiency \cite{fine-tuning-frameworks}. My experimentation followed an iterative path:
+\begin{itemize}
+    \item \textbf{Configuration A:} I initially set $r=16$, targeting the attention projections: \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, and \texttt{o\_proj}.
+    \item \textbf{Configuration B:} I subsequently increased the rank to $r=64$ and expanded the target modules to include the MLP layers (\texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}) and the \texttt{lm\_head}.
+\end{itemize}
+While the increased capacity in Configuration B yielded only marginal gains for models specialized in a single task, it proved essential for the multi-task "combined" model. As detailed in the following section, this higher-rank adaptation provided the necessary representational capacity to handle the increased complexity of switching between \ac{mcq} and \ac{saq} formats within a single architecture.
+
+% TODO add reference to model parameters (table in appendix)
 
 \subsection{Combining Tasks}
+\label{sec:combining-tasks}
 
-Right from the beginning I asked myself whether it was necessary to train one model for each task or if a single model can be trained for both leveraging the knowledge it leant in the training data of the one task and applying it to questions of the other. When using a single model, the task has to be encoded somehow in the prompt so the model knows what answer format is expected. However, with the additional instruction field I added earlier, this was definitely possible.
+Right from the beginning I asked myself whether it was necessary to train one model for each task or if a single model can be trained for both leveraging the knowledge it learnt in the training data of the one task and applying it to questions of the other. When using a single model, the task has to be encoded somehow in the prompt so the model knows what answer format is expected. However, with the additional instruction field I added earlier, this was definitely possible.
 
-%TODO unexpectecly results didn't who high difference but I still continued to test out both versions for each change
+With the initial number of samples and no added context the results were just about the same as using specialized models for each task. However the improvements in the fine tuning\ref{sec:fine-tuning}, contextual prompting\ref{sec:contextual-prompting}, and the added samples\ref{sec:data-augmentation}, the combined performed better than the specialized models.
+
+\subsection{Contextual Prompting}
+\label{sec:contextual-prompting}
+
+To clearly distinguish between the two tasks for the combined model, I introduced a structural context to each prompt. This involved explicitly defining the task type and the target country, followed by a task-specific instruction. 
+
+This formatting ensures that the model switches to the appropriate response mode (letter-selection for \acp{mcq} vs. concise naming for \acp{saq}). Examples of the final training prompt structures for both \ac{mcq} and \ac{saq} tasks are provided in \textbf{Appendix \ref{sec:appendix_prompts}}.
+With this change a training-prompt for \ac{mcq} looks like this:
 
 \subsection{Data Augmentation}
+\label{sec:data-augmentation}
 
-While it felt like I was in a dead-end with hyperparameter tuning and task separation and my score was pushed down more and more in the leaderboard I revised the lectures to see what other options I had to improve the results. The one thing where I haven't spent much thought on was the data itself. 
-I thought about synthetic data generation and using a bigger model to generate additional training data. However, I wasn't sure whether the quality of the generated data would be good enough as I could not validate it myself, also it would have cost me significantly more time to set this up and also it felt a bit like cheating exploiting a bigger model to generate more training data. When first writing the code for extracting the data from the \texttt{train\_dataset\_saq.csv} I only took the answer with the highest count as being the answer with the highest certainty of correctness. However, to gain more training data I changed this to multiplying the question and using each possible answer.
-Now the question was whether something similar was possible to the \ac{mcq} data. Actually I haven't used all information there either. For each answer option there was given the name of that country for which this answer would be true. I didn't give this much thought in the beginning either but this allows to increase the number of training samples for \ac{mcq} by four times using each answer option as a separate training sample. The only thing that has to be done for that is replacing the country in the initial question with the one from the answer option and changing the correct answer in the training data to that option.
+As competition on the leaderboard intensified, I re-evaluated the training data pipeline to maximize information extraction. While I initially considered synthetic data generation via larger teacher models, I decided against this approach to avoid introducing hallucinated cultural biases and to maintain the factual integrity of the ground-truth data.
+
+In the initial implementation for \ac{saq}, I only extracted the answer with the highest consensus count. In an attempt to increase the dataset size, I experimented with a "one-to-many" augmentation strategy, creating separate training samples for every unique answer provided in the annotations. However, this led to Label Noise Conflict. The model was presented with identical input prompts mapped to different target strings. This ambiguity hindered convergence, probably because the loss function penalized the model for predicted answers that were technically correct but did not match the specific "noisy" label of that sample.
+
+For the \ac{mcq} task, I implemented a more successful augmentation strategy based on Country-Choice Permutation. Since the dataset provided the corresponding country for each of the four answer options, I was able to quadruplicate the \ac{mcq} samples. By replacing the country name in the prompt with the alternative country from the choices and updating the target label accordingly, I expanded the dataset while maintaining high label fidelity.
+
+This augmentation created a significant class imbalance for the combined model, where \ac{mcq} samples outnumbered \ac{saq} samples. To prevent the model from developing a task-specific bias or neglecting the more complex linguistic requirements of the \ac{saq} task, I applied Uniform Upsampling to the \ac{saq} dataset. By duplicating the consolidated \ac{saq} samples until a 1:1 ratio was achieved.
 
 \section{Results}
+\label{sec:results}
 
-\subsection{Improvements}
+% TODO add graph of improvement steps from notebook
 
-% diagram showing rising accuracy with each iteration
+\section{Conclusion}
+\label{sec:conclusion}
 
-\subsection{Conclusion}
+This project provided a comprehensive practical application of the Large Language Model (LLM) optimization techniques covered throughout the course. The transition from a zero-shot Llama-3-8B baseline to a task-aligned, culturally-aware model highlighted the importance of the learned techniques.
 
-% table showing final accuracy of the best performaing mode (what is listed in leaderboard)
+The iterative nature of the project demonstrated that while hyperparameter tuning (such as increasing LoRA rank) provides a foundation, the most significant performance gains often stem from contextual grounding and data-centric refinements. The open-ended nature of the task allowed for a rigorous exploration of the "base-to-specialized" pipeline, a skill set that is directly transferable to other specialized domains requiring local LLM deployment. Future work could involve exploring higher-rank adaptations or more diverse cultural datasets to further minimize the performance gap observed in complex \acp{saq}.
 
+\section*{Acknowledgements and Aids}
 
-\section{Tools}
-
-Throughout working on this project, \textit{Google Gemini Pro} was used for coding asssistance and fixing grammar and typos in this report.
+I would like to thank the course instructors for the organization of the project as well as providing access to the high-performance computing resources necessary for this experimentation. Additionally, the \textit{Gemini} language model (Google) was utilized for coding assistance, grammar refinement, and structural proofreading during the preparation of this report.
 
 
 \bibliography{references}
 
 \appendix
 
-\section{Example Appendix}
-\label{sec:appendix}
+\section{Prompt Templates}
+\label{sec:appendix_prompts}
 
-This is an appendix.
+This appendix provides the full structure of the prompts used during the fine-tuning of the \textit{Meta-Llama-3-8B} model.
+
+\subsection{MCQ Training Prompt}
+\label{sec:mcq_prompt}
+
+\noindent\begin{minipage}{\linewidth}
+\begin{lstlisting}
+Context:
+Task: Multiple Choice Question
+Country: Iran
+
+Instruction: 
+The following is a multiple-choice question about cultural practices and preferences. Based on the specified country, select the single most accurate letter choice (A, B, C, or D).
+
+Input:
+What are the required subjects in Iran's university entrance exam?
+
+A. chinese
+B. culinary arts
+C. korean language
+D. mathematics.
+
+Response:
+D
+\end{lstlisting}
+\end{minipage}
+
+\subsection{SAQ Training Prompt}
+\label{sec:saq_prompt}
+\noindent\begin{minipage}{\linewidth} % Forces the block to stay together
+\begin{lstlisting}
+Context:
+Task: Single Answer Question
+Country: China
+
+Instruction:
+Provide a direct and concise answer to the cultural question below. Use only a single word or short phrase that represents the general consensus in the specified country.
+
+Input:
+What is the main dish for Thanksgiving in China?
+
+Response:
+Fish
+\end{lstlisting}
+\end{minipage}
+
 
 \end{document}
